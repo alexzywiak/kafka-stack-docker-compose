@@ -1,136 +1,94 @@
-# kafka-stack-docker-compose
+[![Docker Pulls](https://img.shields.io/docker/pulls/wurstmeister/kafka.svg)](https://hub.docker.com/r/wurstmeister/kafka/)
+[![Docker Stars](https://img.shields.io/docker/stars/wurstmeister/kafka.svg)](https://hub.docker.com/r/wurstmeister/kafka/)
+[![](https://badge.imagelayers.io/wurstmeister/kafka:latest.svg)](https://imagelayers.io/?images=wurstmeister/kafka:latest)
 
-This replicates as well as possible real deployment configurations, where you have your zookeeper servers and kafka servers actually all distinct from each other. This solves all the networking hurdles that comes with docker-compose, and is compatible cross platform. It only requires an update to your host files.
+kafka-docker
+============
 
-## Stack version
+Dockerfile for [Apache Kafka](http://kafka.apache.org/)
 
-  - Zookeeper version: 3.4.9
-  - Kafka version: 0.10.2.1 (Confluent 3.2.1)
-  - Kafka Schema Registry: Confluent 3.2.1
-  - Kafka Schema Registry UI: 0.9.1
-  - Kafka Rest Proxy: Confluent 3.2.1
-  - Kafka Topics UI: 0.9.1
-  - Kafka Connect: Confluent 3.2.1
-  - Kafka Connect UI: 0.9.2
+The image is available directly from [Docker Hub](https://hub.docker.com/r/wurstmeister/kafka/)
 
-# Requirements
+## Pre-Requisites
 
-## Host File changes
+- install docker-compose [https://docs.docker.com/compose/install/](https://docs.docker.com/compose/install/)
+- modify the ```KAFKA_ADVERTISED_HOST_NAME``` in ```docker-compose.yml``` to match your docker host IP (Note: Do not use localhost or 127.0.0.1 as the host ip if you want to run multiple brokers.)
+- if you want to customize any Kafka parameters, simply add them as environment variables in ```docker-compose.yml```, e.g. in order to increase the ```message.max.bytes``` parameter set the environment to ```KAFKA_MESSAGE_MAX_BYTES: 2000000```. To turn off automatic topic creation set ```KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'```
 
-See https://support.rackspace.com/how-to/modify-your-hosts-file/ to detailed instructions on how to modify your host files.
+## Usage
 
-If you are using Docker for Mac >= 1.12, Docker for Linux, or Docker for Windows 10, then please add the following lines to `/etc/hosts` or `C:\Windows\System32\Drivers\etc\hosts`:
+Start a cluster:
+
+- ```docker-compose up -d ```
+
+Add more brokers:
+
+- ```docker-compose scale kafka=3```
+
+Destroy a cluster:
+
+- ```docker-compose stop```
+
+## Note
+
+The default ```docker-compose.yml``` should be seen as a starting point. By default each broker will get a new port number and broker id on restart. Depending on your use case this might not be desirable. If you need to use specific ports and broker ids, modify the docker-compose configuration accordingly, e.g. [docker-compose-single-broker.yml](https://github.com/wurstmeister/kafka-docker/blob/master/docker-compose-single-broker.yml):
+
+- ```docker-compose -f docker-compose-single-broker.yml up```
+
+## Broker IDs
+
+You can configure the broker id in different ways
+
+1. explicitly, using ```KAFKA_BROKER_ID```
+2. via a command, using ```BROKER_ID_COMMAND```, e.g. ```BROKER_ID_COMMAND: "hostname | awk -F'-' '{print $2}'"```
+
+If you don't specify a broker id in your docker-compose file, it will automatically be generated (see [https://issues.apache.org/jira/browse/KAFKA-1070](https://issues.apache.org/jira/browse/KAFKA-1070). This allows scaling up and down. In this case it is recommended to use the ```--no-recreate``` option of docker-compose to ensure that containers are not re-created and thus keep their names and ids.
+
+
+## Automatically create topics
+
+If you want to have kafka-docker automatically create topics in Kafka during
+creation, a ```KAFKA_CREATE_TOPICS``` environment variable can be
+added in ```docker-compose.yml```.
+
+Here is an example snippet from ```docker-compose.yml```:
+
+        environment:
+          KAFKA_CREATE_TOPICS: "Topic1:1:3,Topic2:1:1:compact"
+
+```Topic 1``` will have 1 partition and 3 replicas, ```Topic 2``` will have 1 partition, 1 replica and a `cleanup.policy` set to `compact`.
+
+## Advertised hostname
+
+You can configure the advertised hostname in different ways
+
+1. explicitly, using ```KAFKA_ADVERTISED_HOST_NAME```
+2. via a command, using ```HOSTNAME_COMMAND```, e.g. ```HOSTNAME_COMMAND: "route -n | awk '/UG[ \t]/{print $$2}'"```
+
+When using commands, make sure you review the "Variable Substitution" section in [https://docs.docker.com/compose/compose-file/](https://docs.docker.com/compose/compose-file/)
+
+If ```KAFKA_ADVERTISED_HOST_NAME``` is specified, it takes precedence over ```HOSTNAME_COMMAND```
+
+For AWS deployment, you can use the Metadata service to get the container host's IP:
 ```
-127.0.0.1     kafka1
-127.0.0.1     kafka2
-127.0.0.1     kafka3
-127.0.0.1     zoo1
-127.0.0.1     zoo2
-127.0.0.1     zoo3
-127.0.0.1     kafka-schema-registry
-127.0.0.1     kafka-schema-registry-ui
-127.0.0.1     kafka-rest-proxy
-127.0.0.1     kafka-topics-ui
-127.0.0.1     kafka-connect-ui
+HOSTNAME_COMMAND=wget -t3 -T2 -qO-  http://169.254.169.254/latest/meta-data/local-ipv4
 ```
+Reference: http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-metadata.html
 
-If you are using Docker for Mac <= 1.11, or Docker Toolbox for Windows
-(your docker machine IP is usually `192.168.99.100`)
-Please add the following lines to `/etc/hosts` or `C:\Windows\System32\Drivers\etc\hosts`:
-```
-192.168.99.100    kafka1
-192.168.99.100    kafka2
-192.168.99.100    kafka3
-192.168.99.100    zoo1
-192.168.99.100    zoo2
-192.168.99.100    zoo3
-192.168.99.100    kafka-schema-registry
-192.168.99.100    kafka-schema-registry-ui
-192.168.99.100    kafka-rest-proxy
-192.168.99.100    kafka-topics-ui
-192.168.99.100    kafka-connect-ui
-```
+## JMX
 
-## Single Zookeeper / Single Kafka
+For monitoring purposes you may wish to configure JMX. Additional to the standard JMX parameters, problems could arise from the underlying RMI protocol used to connect
 
-This configuration fits most development requirements.
+* java.rmi.server.hostname - interface to bind listening port
+* com.sun.management.jmxremote.rmi.port - The port to service RMI requests
 
- - Zookeeper will be available at `zoo1:2181`
- - Kafka will be available at `kafka1:9092`
+For example, to connect to a kafka running locally (assumes exposing port 1099)
 
+      KAFKA_JMX_OPTS: "-Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false -Djava.rmi.server.hostname=127.0.0.1 -Dcom.sun.management.jmxremote.rmi.port=1099"
+      JMX_PORT: 1099
 
-Run with:
-```
-docker-compose -f zk-single-kafka-single.yml up
-docker-compose -f zk-single-kafka-single.yml down
-```
+Jconsole can now connect at ```jconsole 192.168.99.100:1099```
 
-## Single Zookeeper / Multiple Kafka
+## Tutorial
 
-If you want to have two brokers and experiment with replication / fault-tolerance.
-
-- Zookeeper will be available at `zoo1:2181`
-- Kafka will be available at `kafka1:9092,kafka2:9093,kafka3:9094`
-
-
-Run with:
-```
-docker-compose -f zk-single-kafka-multiple.yml up
-docker-compose -f zk-single-kafka-multiple.yml down
-```
-
-## Multiple Zookeeper / Single Kafka
-
-If you want to have three zookeeper and experiment with zookeeper fault-tolerance.
-
-- Zookeeper will be available at `zoo1:2181,zoo2:2182,zoo3:2183`
-- Kafka will be available at `kafka1:9092`
-
-Run with:
-```
-docker-compose -f zk-multiple-kafka-single.yml up
-docker-compose -f zk-multiple-kafka-single.yml down
-```
-
-
-## Multiple Zookeeper / Multiple Kafka
-
-If you want to have three zookeeper and two kafka brokers to experiment with production setup.
-
-- Zookeeper will be available at `zoo1:2181,zoo2:2182,zoo3:2183`
-- Kafka will be available at `kafka1:9092,kafka2:9093,kafka3:9094`
-
-Run with:
-```
-docker-compose -f zk-multiple-kafka-multiple.yml up
-docker-compose -f zk-multiple-kafka-multiple.yml down
-```
-
-
-## Full stack
-
- - Single Zookeeper: `zoo1:2181`
- - Single Kafka: `kafka1:9092`
- - Kafka Schema Registry: `kafka-schema-registry:8081`
- - Kafka Schema Registry UI: `kafka-schema-registry-ui:8001`
- - Kafka Rest Proxy: `kafka-rest-proxy:8082`
- - Kafka Topics UI: `kafka-topics-ui:8000`
- - Kafka Connect: `kafka-connect:8083`
- - Kafka Connect UI: `kafka-connect-ui:8003`
-
-
- Run with:
- ```
- docker-compose -f full-stack.yml up
- docker-compose -f full-stack.yml down
- ```
-
-# FAQ
-
-## Kafka
-
-Q: Kafka's log is too verbose, how can I reduce it?
-A: Add the following line to your docker-compose environment variables: `KAFKA_LOG4J_LOGGERS: "kafka.controller=INFO,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO"`. Full logging control can be accessed here: https://github.com/confluentinc/cp-docker-images/blob/master/debian/kafka/include/etc/confluent/docker/log4j.properties.template
-
-Q: How do I delete data to start fresh?
-A: Your data is persisted from within the docker compose folder, so if you want for example to reset the data in the full-stack docker compose, first do a `docker-compose -f full-stack.yml down`, then remove the directory `full-stack`, for example by doing `rm -r -f full-stack`.
+[http://wurstmeister.github.io/kafka-docker/](http://wurstmeister.github.io/kafka-docker/)
